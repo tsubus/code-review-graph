@@ -35,6 +35,8 @@ from code_review_graph.skills import (
     install_git_hook,
     install_hooks,
     install_opencode_plugin,
+    install_omp_hooks,
+    _omp_hook_content,
     install_platform_configs,
 )
 
@@ -1519,3 +1521,161 @@ class TestInstallOpenCodePlugin:
         # Should be readable as UTF-8 without errors
         content = result.read_text(encoding="utf-8")
         assert len(content) > 0
+
+
+class TestOmpHookContent:
+    """Tests for _omp_hook_content()."""
+
+    def test_has_default_export(self):
+        content = _omp_hook_content()
+        assert "export default function" in content
+
+    def test_has_session_start_handler(self):
+        content = _omp_hook_content()
+        assert 'pi.on("session_start"' in content
+
+    def test_has_tool_result_handler(self):
+        content = _omp_hook_content()
+        assert 'pi.on("tool_result"' in content
+
+    def test_has_error_handling(self):
+        content = _omp_hook_content()
+        assert content.count("} catch") >= 2
+
+    def test_runs_status_on_session_start(self):
+        content = _omp_hook_content()
+        assert "status" in content
+        assert "--brief" in content
+
+    def test_runs_update_on_file_edit(self):
+        content = _omp_hook_content()
+        assert "update" in content
+        assert "--skip-flows" in content
+
+
+class TestInstallOmpHooks:
+    """Tests for install_omp_hooks()."""
+
+    def test_creates_hook_file(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            result = install_omp_hooks(tmp_path)
+        assert result.exists()
+        assert result == tmp_path / ".omp" / "agent" / "hooks" / "code-review-graph.ts"
+
+    def test_hook_file_has_correct_content(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            result = install_omp_hooks(tmp_path)
+        content = result.read_text(encoding="utf-8")
+        assert "export default function" in content
+        assert "session_start" in content
+        assert "tool_result" in content
+
+    def test_creates_parent_directories(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            install_omp_hooks(tmp_path)
+        hooks_dir = tmp_path / ".omp" / "agent" / "hooks"
+        assert hooks_dir.is_dir()
+
+    def test_overwrites_existing_hook(self, tmp_path):
+        hooks_dir = tmp_path / ".omp" / "agent" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        old_hook = hooks_dir / "code-review-graph.ts"
+        old_hook.write_text("// old version")
+
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            install_omp_hooks(tmp_path)
+
+        content = old_hook.read_text()
+        assert "// old version" not in content
+        assert "export default function" in content
+
+    def test_idempotent(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            install_omp_hooks(tmp_path)
+            result = install_omp_hooks(tmp_path)
+        content = result.read_text()
+        assert "export default function" in content
+        # Only one default export in the file
+        assert content.count("export default function") == 1
+
+    def test_file_is_typescript(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            result = install_omp_hooks(tmp_path)
+        assert result.suffix == ".ts"
+
+    def test_file_is_utf8(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            result = install_omp_hooks(tmp_path)
+        content = result.read_text(encoding="utf-8")
+        assert len(content) > 0
+
+class TestInstallOmpConfig:
+    """Tests for OMP platform MCP config installation."""
+
+    def test_install_omp_config(self, tmp_path):
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            configured = install_platform_configs(tmp_path, target="omp")
+        assert "Oh My Pi" in configured
+
+        config_path = tmp_path / ".omp" / "agent" / "mcp.json"
+        assert config_path.exists()
+
+        data = json.loads(config_path.read_text())
+        assert "code-review-graph" in data["mcpServers"]
+        entry = data["mcpServers"]["code-review-graph"]
+        assert entry["type"] == "stdio"
+        assert entry["args"][-1] == "serve"
+
+    def test_install_omp_preserves_existing_servers(self, tmp_path):
+        """Adding omp should merge with, not clobber, existing mcpServers."""
+        omp_config = tmp_path / ".omp" / "agent" / "mcp.json"
+        omp_config.parent.mkdir(parents=True)
+        omp_config.write_text(
+            json.dumps({"mcpServers": {"other-server": {"command": "other"}}}),
+            encoding="utf-8",
+        )
+
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            install_platform_configs(tmp_path, target="omp")
+
+        data = json.loads(omp_config.read_text())
+        assert "other-server" in data["mcpServers"]
+        assert "code-review-graph" in data["mcpServers"]
+
+    def test_install_omp_no_duplicate(self, tmp_path):
+        """Second install skips when code-review-graph already exists."""
+        omp_config = tmp_path / ".omp" / "agent" / "mcp.json"
+        omp_config.parent.mkdir(parents=True)
+        omp_config.write_text(
+            json.dumps(
+                {"mcpServers": {"code-review-graph": {"command": "uvx", "args": ["serve"]}}}
+            ),
+            encoding="utf-8",
+        )
+
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            configured = install_platform_configs(tmp_path, target="omp")
+        assert "Oh My Pi" in configured
+
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            second = install_platform_configs(tmp_path, target="omp")
+        assert "Oh My Pi" in second
+
+        content = omp_config.read_text()
+        data = json.loads(content)
+        assert list(data["mcpServers"].keys()).count("code-review-graph") == 1
+
+    def test_omp_detected_when_home_dot_omp_exists(self, tmp_path):
+        """OMP is included in target='all' when ~/.omp exists."""
+        (tmp_path / ".omp").mkdir()
+        with patch("code_review_graph.skills.Path.home", return_value=tmp_path):
+            configured = install_platform_configs(tmp_path, target="all")
+        assert "Oh My Pi" in configured
+
+    def test_omp_not_detected_when_home_dot_omp_missing(self, tmp_path):
+        """OMP is skipped in target='all' when ~/.omp does not exist."""
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        with patch("code_review_graph.skills.Path.home", return_value=fake_home):
+            configured = install_platform_configs(tmp_path, target="all")
+        assert "Oh My Pi" not in configured

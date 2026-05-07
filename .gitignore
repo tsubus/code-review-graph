@@ -47,6 +47,9 @@ code-review-graph-vscode/dist/
 .qoder/
 QODER.md
 
+# oh-my-pi
+.omp/
+
 # Coverage
 htmlcov/
 .coverage

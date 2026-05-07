@@ -145,6 +145,14 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "format": "object",
         "needs_type": True,
     },
+    "omp": {
+        "name": "Oh My Pi",
+        "config_path": lambda root: Path.home() / ".omp" / "agent" / "mcp.json",
+        "key": "mcpServers",
+        "detect": lambda: (Path.home() / ".omp").exists(),
+        "format": "object",
+        "needs_type": True,
+    },
 }
 
 
@@ -1338,6 +1346,76 @@ def install_qoder_skills(repo_root: Path) -> Path | None:
         logger.info("Installed %d skill(s) to %s", installed_count, qoder_skills_dir)
         return qoder_skills_dir
     return None
+
+
+# --- Oh My Pi hooks ---
+
+
+def _omp_hook_content() -> str:
+    """Return TypeScript source for the OMP hook module.
+
+    The hook shows graph status on session start and auto-updates
+    the graph after file edits.
+
+    Installed by: code-review-graph install --platform omp
+    """
+    return """\
+import type { HookAPI } from "@oh-my-pi/pi-coding-agent/extensibility/hooks"
+
+/**
+ * code-review-graph hook for Oh My Pi.
+ *
+ * Keeps the knowledge graph up-to-date and surfaces status
+ * information automatically during coding sessions.
+ *
+ * Installed by: code-review-graph install --platform omp
+ */
+
+export default function (pi: HookAPI): void {
+  // 1. Show graph status when a new session starts
+  pi.on("session_start", async (_event, ctx) => {
+    try {
+      const result = await pi.exec("code-review-graph", ["status", "--brief"])
+      if (result.stdout) {
+        ctx.logger.info("[code-review-graph] " + result.stdout.trim())
+      }
+    } catch {
+      // Swallow — not every project has a graph.
+    }
+  })
+
+  // 2. Auto-update graph after file edits
+  pi.on("tool_result", async (event, _ctx) => {
+    try {
+      if (event.toolName !== "write" && event.toolName !== "edit") return
+      await pi.exec("code-review-graph", ["update", "--skip-flows"])
+    } catch {
+      // Swallow — graph may not be built yet for this project.
+    }
+  })
+}
+"""
+
+
+def install_omp_hooks(repo_root: Path) -> Path:
+    """Install Oh My Pi hooks in ``~/.omp/agent/hooks/code-review-graph.ts``.
+
+    Creates the ``~/.omp/agent/hooks/`` directory if it does not exist.
+    Overwrites the file if it already exists (idempotent).
+
+    Args:
+        repo_root: Repository root directory (unused; kept for API
+            compatibility with other hook installers).
+
+    Returns:
+        Path to the hook file that was written.
+    """
+    hooks_dir = Path.home() / ".omp" / "agent" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "code-review-graph.ts"
+    hook_path.write_text(_omp_hook_content(), encoding="utf-8")
+    logger.info("Wrote OMP hooks: %s", hook_path)
+    return hook_path
 
 
 # --- OpenCode plugin ---

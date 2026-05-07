@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 _PLATFORM_CHOICES = [
     "codex", "claude", "claude-code", "cursor", "windsurf", "zed",
     "continue", "opencode", "antigravity", "gemini-cli", "qwen", "kiro", "qoder",
+    "omp",
     "copilot", "copilot-cli", "all",
 ]
 
@@ -238,6 +239,7 @@ def _handle_init(args: argparse.Namespace) -> None:
         install_git_hook,
         install_hooks,
         install_opencode_plugin,
+        install_omp_hooks,
         install_qoder_skills,
     )
 
@@ -315,6 +317,14 @@ def _handle_init(args: argparse.Namespace) -> None:
             print(f"Installed OpenCode plugin in {plugin_path}")
         except Exception as exc:
             logger.warning("Could not install OpenCode plugin: %s", exc)
+
+    # Oh My Pi hooks (project-level, in .omp/hooks/)
+    if not skip_hooks and target in ("all", "omp"):
+        try:
+            omp_hooks_path = install_omp_hooks(repo_root)
+            print(f"Installed OMP hooks in {omp_hooks_path}")
+        except Exception as exc:
+            logger.warning("Could not install OMP hooks: %s", exc)
 
     print()
     print("Next steps:")

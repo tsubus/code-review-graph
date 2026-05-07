@@ -35,6 +35,7 @@ code-review-graph install --platform claude-code
 | **Gemini CLI** | `.gemini/settings.json` |
 | **Qwen Code** | `~/.qwen/settings.json` |
 | **Qoder** | `.qoder/mcp.json` |
+| **Oh My Pi** | `~/.omp/agent/mcp.json` + `~/.omp/agent/hooks/code-review-graph.ts` |
 
 ## Core Workflow
 
